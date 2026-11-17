@@ -19,7 +19,7 @@ def aws(*args, data=None):
     if data:
         import boto3
         # Export temporary CLI credentials directly into memory for this API call.
-        credentials = json.loads(subprocess.check_output(["aws", "configure", "export-credentials", "--format", "process"], text=True))
+        credentials = json.loads(subprocess.check_output(["aws", "configure", "export-credentials", "--region", REGION, "--format", "process"], text=True))
         client = boto3.client(args[0], region_name=REGION,
             aws_access_key_id=credentials["AccessKeyId"], aws_secret_access_key=credentials["SecretAccessKey"],
             aws_session_token=credentials.get("SessionToken"))
