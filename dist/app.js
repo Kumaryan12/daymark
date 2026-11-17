@@ -68,6 +68,7 @@ function save(items) {
   catch { notify('This browser could not save the changes. Free some browser storage and try again.'); return false; }
   state = items;
   render();
+  window.dispatchEvent(new Event('daymark-plan-changed'));
   return true;
 }
 
@@ -243,7 +244,7 @@ dialog.addEventListener('close', () => {
 });
 
 const fullSource = (source, title = 'Read extracted notice text') =>
-  `<details><summary>${esc(title)}</summary><div class="source-text">${esc(source.text)}</div></details>`;
+  `<details><summary>${esc(title)}</summary><div class="source-text">${source.sentAt ? 'Message dated ' + esc(source.sentAt.replace('T', ' · ')) + '\n\n' : ''}${esc(source.text)}</div></details>`;
 const quotes = source => source.quotes.length ? `<blockquote>${esc(source.quotes.join('\n'))}</blockquote>` : '';
 const detail = (label, value) => `<div class="detail"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`;
 
@@ -254,6 +255,7 @@ function details(item) {
     <div class="detail-grid">${detail('Due date', item.cancelled ? 'Cancelled' : model.fmtDate(item.due, true))}${detail('Amount', model.currency(item.amount) || '—')}</div>
     <h3>Source text</h3>${quotes(item.source)}${fullSource(item.source)}
     ${item.history.map((entry, index) => fullSource(entry.source, 'Previous notice ' + (index + 1) + ' · ' + model.fmtDate(entry.due, true))).join('')}
+    ${!item.done && !item.cancelled ? '<div class="reminder-line">' + icon('clock') + (item.reminder ? 'Reminder at ' + esc(item.reminder.time) + ' on the due date' : 'No reminder set') + ' <button class="text-button" data-action="reminders">Manage reminders</button></div>' : ''}
     <div class="dialog-actions">
       <button type="button" class="button danger" data-action="delete" data-id="${esc(item.id)}">${icon('trash')} Remove action</button>
       ${item.cancelled ? '' : `<button type="button" class="button outline" data-action="edit" data-id="${esc(item.id)}">${icon('edit')} Edit action</button>`}
@@ -281,10 +283,12 @@ function dateComparison(current, proposed) {
 
 function startReplay() {
   const today = model.dayKey();
-  const [first] = model.parse(model.sample('maintenance', today), 'Sample · Housing group');
-  const [second] = model.parse(model.sample('revision', today), 'Sample · Housing group correction');
+  const original = 'Campus accounts\nRef CF-104\nPlease pay semester fees of ₹2,500 by ' + model.fmtDate(today, true) + '.';
+  const [first] = model.parse(original, 'Sample · College notice', { sender: 'Campus accounts', sentAt: model.dateAt(today, -1) + 'T09:00' });
+  const [correction] = model.parse('Guys, semester fees extended to Friday.', 'Sample · Class group', { sender: 'Campus accounts', sentAt: model.dateAt(today, 1) + 'T11:30' });
+  const second = model.dateEvidence(correction);
   const initial = model.merge([], first, 'replay-notice').items;
-  const [item] = model.merge(initial, second, 'replay-revision').items;
+  const [item] = model.merge(initial, { ...second, targetId: 'replay-notice' }, 'replay-revision').items;
   replayState = { step: 0, item, result: null, accepted: false };
   renderReplay();
 }
@@ -292,8 +296,8 @@ function startReplay() {
 function replayNotice(source, heading, variant = '') {
   return `<article class="replay-message ${variant}">
     <span class="replay-avatar" aria-hidden="true">MR</span>
-    <div><header><strong>Maple Residency</strong><span>${heading}</span></header>
-    ${quotes(source)}<small>Ref MR-1126</small></div>
+    <div><header><strong>Campus accounts</strong><span>${heading}</span></header>
+    ${quotes(source)}<small>${source.sentAt ? esc(source.sentAt.replace('T', ' · ')) : 'Sample notice'}</small></div>
   </article>`;
 }
 
@@ -306,13 +310,15 @@ function renderReplay() {
   ).join('')}</ol>`;
   let content;
   if (step === 0) {
-    content = `<p class="replay-intro">A maintenance bill lands in your housing group. Daymark finds the due date and keeps the original wording beside it.</p>
+    content = `<p class="replay-intro">A semester fee notice arrives from college accounts. Daymark finds the due date and keeps the original wording beside it.</p>
       ${replayNotice(item.source, 'Original notice')}
-      <div class="replay-facts">${detail('Action', 'Pay society maintenance')}${detail('Due date', model.fmtDate(item.due, true))}${detail('Amount', model.currency(item.amount))}</div>
+      <div class="replay-facts">${detail('Action', 'Pay semester fees')}${detail('Due date', model.fmtDate(item.due, true))}${detail('Amount', model.currency(item.amount))}</div>
       <div class="dialog-actions"><button class="button dark" data-action="replay-arrive">Reveal the follow-up ${icon('arrow')}</button></div>`;
   } else if (step === 1) {
-    content = `<p class="replay-intro">A second message has the same sender and reference. Its deadline disagrees with the one saved in the plan.</p>
+    content = `<p class="replay-intro">The class group says “extended to Friday” and omits the notice number. Sender, topic and message date help connect the correction.</p>
       <div class="replay-pair">${replayNotice(item.source, 'Saved notice')}${replayNotice(item.pending.source, 'New message', 'replay-arrived')}</div>
+      <div class="match-evidence">${item.pending.evidence.map(value => '<span>' + icon('check') + esc(value) + '</span>').join('')}</div>
+      <p class="dialog-copy">${esc(item.pending.interpretation || '')}</p>
       ${dateComparison(item.due, proposed)}
       <div class="dialog-actions">
         <button class="button outline" data-choice="original" data-action="replay-decision">Keep original date</button>
@@ -340,6 +346,8 @@ function review(item) {
     ${amount !== '' ? `<p>${esc(model.currency(amount))}</p>` : ''}${quotes(source)}${fullSource(source, 'Full notice')}</div>`;
   openDialog(changeLabel(item), [item.title, item.reference].filter(Boolean).join(' · '), `
     <p class="dialog-copy">Compare the saved notice with the proposed change. Your plan updates when you approve it.</p>
+    ${next.evidence?.length ? '<div class="match-evidence">' + next.evidence.map(value => '<span>' + icon('check') + esc(value) + '</span>').join('') + '</div>' : ''}
+    ${next.source.sentAt ? '<p class="dialog-copy">Message dated ' + esc(next.source.sentAt.replace('T', ' · ')) + '</p>' : ''}
     ${dateComparison(item.due, next.due)}
     <div class="compare">${pane('', 'Saved in your plan', model.fmtDate(item.due, true), item.amount, item.source)}
       ${pane('proposed', 'Proposed change', proposed, next.cancelled ? '' : next.amount === '' ? item.amount : next.amount, next.source)}</div>
@@ -364,20 +372,58 @@ function beginDraft(text, sourceName, isDemo = false) {
   if (!drafts.length) throw new Error('No notice text could be read. Paste the text and try again.');
   openDialog('Review extracted actions', `${sourceName} · ${drafts.length} ${drafts.length === 1 ? 'action' : 'actions'}`, `
     <form id="draft-form">
-      ${drafts.map((candidate, index) => {
-        const target = model.matchAction(state, candidate);
-        return `<fieldset class="draft"><legend>${esc(model.categories[candidate.category].label)}</legend>
+      ${drafts.map((candidate, index) => `<fieldset class="draft" data-draft="${index}"><legend>${esc(model.categories[candidate.category].label)}</legend>
           ${formFields(candidate, index)}
-          ${candidate.issues.map(issue => `<p class="review-note">${esc(issue)}</p>`).join('')}
-          ${target && model.difference(target, candidate) ? `<p class="review-note">Matches “${esc(target.title)}”. A change will be queued for review.</p>` : ''}
+          <label class="field">Original message date and time
+            <input type="datetime-local" name="sent-${index}" value="${esc(candidate.source.sentAt)}">
+            <small>Use the time on the message. Relative dates are interpreted from this date.</small>
+          </label>
+          <div class="draft-issues" data-issues="${index}">${candidate.issues.map(issue => `<p class="review-note">${esc(issue)}</p>`).join('')}</div>
+          <div class="match-options" data-matches="${index}"></div>
           ${quotes(candidate.source)}
-          ${candidate.cancelled ? `<label class="check-field"><input type="checkbox" name="cancelled-${index}" checked> This notice cancels the earlier action</label>` : `<label class="check-field"><input type="checkbox" name="separate-${index}"> Treat as a separate action if it matches a saved notice</label>`}
-        </fieldset>`;
-      }).join('')}
+          ${candidate.cancelled ? `<label class="check-field"><input type="checkbox" name="cancelled-${index}" checked> This notice cancels the earlier action</label>` : ''}
+        </fieldset>`).join('')}
       ${fullSource(drafts[0].source)}
       <p class="dialog-error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="button outline" data-action="close">Cancel</button><button class="button dark" type="submit">${icon('check')} Save to action plan</button></div>
     </form>`);
+  drafts.forEach((candidate, index) => updateDraftMatches(index));
+}
+
+function updateDraftMatches(index) {
+  const form = $('#draft-form');
+  if (!form) return;
+  const candidate = importDraft[index];
+  const data = new FormData(form);
+  const fields = fieldValues(data, index);
+  const sentAt = String(data.get('sent-' + index) || '');
+  const proposal = model.dateEvidence({ ...candidate, ...fields, source: { ...candidate.source, sentAt } });
+  const dateInput = form.elements['due-' + index];
+  const autoDate = dateInput.dataset.inferred || '';
+  if (!candidate.due && (!dateInput.value || dateInput.value === autoDate)) {
+    const interpretation = model.relativeDate(candidate.source.quotes.join(' ') || candidate.source.text, sentAt);
+    dateInput.value = interpretation?.due || '';
+    dateInput.dataset.inferred = dateInput.value;
+    proposal.due = dateInput.value;
+  }
+  const target = form.querySelector('[data-matches="' + index + '"]');
+  const previous = target.querySelector('input:checked')?.value;
+  const matches = model.matchCandidates(state, proposal).slice(0, 5);
+  const inferred = model.relativeDate(candidate.source.quotes.join(' ') || candidate.source.text, sentAt);
+  const notes = [...candidate.issues.filter(issue => !inferred || !/relative date|No explicit deadline/.test(issue))];
+  if (inferred) notes.push(inferred.explanation);
+  form.querySelector('[data-issues="' + index + '"]').innerHTML = notes.map(issue => '<p class="review-note">' + esc(issue) + '</p>').join('');
+  if (!matches.length) {
+    target.innerHTML = '<p class="dialog-copy">No related action found. This will create a new action.</p>';
+    return;
+  }
+  const defaultId = matches.length === 1 && matches[0].exact ? matches[0].id : '';
+  const selected = previous || defaultId;
+  target.innerHTML = '<h3>Does this belong to an existing action?</h3>' + matches.map(match => `
+    <label class="match-choice"><input type="radio" name="target-${index}" value="${esc(match.id)}" ${selected === match.id ? 'checked' : ''} required>
+    <span><strong>${esc(match.title)}</strong><small>${match.evidence.map(esc).join(' · ')}</small>
+    ${match.older ? '<b class="badge warn">Older notice · will go into source history</b>' : ''}</span></label>`).join('') +
+    `<label class="match-choice"><input type="radio" name="target-${index}" value="new" ${selected === 'new' ? 'checked' : ''} required><span><strong>Create a separate action</strong></span></label>`;
 }
 
 function fieldValues(form, index) {
@@ -407,7 +453,7 @@ function edit(item) {
 function privacy() {
   openDialog('Data & privacy', 'Your action plan is stored in this browser.', `
     <p class="dialog-copy">Daymark reads files on your device. Saved actions include the extracted notice text so you can trace each field back to its source. Anyone using this browser profile can open the plan.</p>
-    <p class="dialog-copy">Calendar exports include titles, dates and amounts for reviewed actions. Opening an export in a calendar can sync those details with that calendar provider.</p>
+    <p class="dialog-copy">When you enable device reminders, the AWS service stores the selected action titles, reminder times and a push subscription for this browser. Disable reminders in the Reminders panel to remove that device record. Calendar exports include titles, dates and amounts for reviewed actions. Opening an export in a calendar can sync those details with that calendar provider.</p>
     <div class="dialog-actions"><button class="button outline" data-action="remove-samples">Remove sample actions</button><button class="button danger" data-action="clear-plan">Clear this plan</button><button class="button dark" data-action="close">Done</button></div>`, `<span class="tool-icon">${icon('shield')}</span>`);
 }
 
@@ -578,6 +624,8 @@ document.addEventListener('click', event => {
   const item = id ? find(id) : null;
   switch (action) {
     case 'add': openImporter(); break;
+    case 'phone-capture': window.DaymarkDevice?.showCapture(); break;
+    case 'reminders': window.DaymarkDevice?.showReminders(); break;
     case 'tab': boardTab = tab || stat; selectedDate = ''; render(); break;
     case 'week': {
       const shift = Number(button.dataset.shift);
@@ -658,8 +706,12 @@ dialog.addEventListener('submit', event => {
   let next = state;
   let added = 0;
   let updates = 0;
+  let archived = 0;
   for (const [index, candidate] of importDraft.entries()) {
-    const draft = { ...candidate, ...fieldValues(data, index), demo: demoDraft, keepSeparate: data.has('separate-' + index),
+    const targetId = String(data.get('target-' + index) || '');
+    const draft = { ...candidate, ...fieldValues(data, index), demo: demoDraft,
+      source: { ...candidate.source, sentAt: String(data.get('sent-' + index) || '') },
+      targetId: targetId === 'new' ? '' : targetId, keepSeparate: targetId === 'new',
       cancelled: candidate.cancelled && data.has('cancelled-' + index) };
     if (!draft.title) { showFormError('Enter a name for each action.'); return; }
     if (draft.cancelled && !model.matchAction(next, draft)) {
@@ -670,6 +722,7 @@ dialog.addEventListener('submit', event => {
     next = result.items;
     added += Number(result.change === 'added');
     updates += Number(result.change === 'updated');
+    archived += Number(result.change === 'archived');
   }
   if (next.length > 55) { showFormError('This plan has 55 actions. Remove some old actions and try again.'); return; }
   boardTab = updates ? 'updates' : 'open';
@@ -677,7 +730,7 @@ dialog.addEventListener('submit', event => {
   if (save(next)) {
     dialog.close();
     $('#notice-text').value = '';
-    notify(added + updates ? [added ? `${added} added` : '', updates ? `${updates} change${updates === 1 ? '' : 's'} to review` : ''].filter(Boolean).join(' · ') + '.' : 'This notice is already in your plan.');
+    notify(added + updates + archived ? [archived ? `${archived} older notice archived` : '', added ? `${added} added` : '', updates ? `${updates} change${updates === 1 ? '' : 's'} to review` : ''].filter(Boolean).join(' · ') + '.' : 'This notice is already in your plan.');
   }
 });
 
@@ -696,6 +749,25 @@ drop.addEventListener('drop', event => { event.preventDefault(); drop.classList.
 window.addEventListener('storage', event => {
   if (event.key === stateKey) { state = load(); if (!dialog.open) render(); }
 });
+dialog.addEventListener('change', event => {
+  const fieldset = event.target.closest('[data-draft]');
+  if (fieldset && !event.target.name.startsWith('target-') && !event.target.name.startsWith('cancelled-')) updateDraftMatches(Number(fieldset.dataset.draft));
+});
+document.addEventListener('paste', event => {
+  if (event.target.matches('input,textarea,[contenteditable]') || processing || dialog.open) return;
+  const file = [...(event.clipboardData?.files || [])].find(file => file.type.startsWith('image/'));
+  if (file) { event.preventDefault(); void processFile(file); }
+});
+window.DaymarkApp = {
+  getState: () => state,
+  save,
+  openDialog,
+  notify,
+  beginDraft,
+  processFile,
+  icon,
+  esc,
+};
 document.querySelectorAll('i[data-icon]').forEach(el => el.innerHTML = svg(el.dataset.icon));
 if (standalone) {
   $('#drop-zone small').textContent = 'TXT · Use the hosted app for images and PDFs';

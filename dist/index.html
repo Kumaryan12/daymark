@@ -4,14 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob: https://ihbnljd8ba.execute-api.ap-south-1.amazonaws.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Turn everyday notices into a private action plan with deadlines, amounts, and original sources.">
   <meta name="theme-color" content="#f7f7f1">
   <title>Daymark — Your personal action inbox</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
   <link rel="icon" href="assets/daymark.svg">
-  <link rel="stylesheet" href="style.css?v=2">
-  <script defer src="model.js"></script>
-  <script defer src="app.js?v=2"></script>
+  <link rel="stylesheet" href="style.css?v=3">
+  <script defer src="reminder-config.js"></script>
+  <script defer src="model.js?v=3"></script>
+  <script defer src="app.js?v=3"></script>
+  <script defer src="device.js?v=3"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -20,6 +24,8 @@
       <a class="brand" href="#" aria-label="Daymark home"><img src="assets/daymark.svg" alt="" width="37" height="37"><span>daymark<span class="brand-dot">.</span></span></a>
       <div class="toolbar-right">
         <span class="today" id="today"></span>
+        <button class="button outline compact" data-action="phone-capture" aria-label="Add from phone"><i data-icon="upload"></i><span>Add from phone</span></button>
+        <button class="button outline compact" data-action="reminders" aria-label="Reminders"><i data-icon="clock"></i><span>Reminders</span></button>
         <button class="privacy" data-action="privacy"><i data-icon="lock"></i><span>Private workspace</span></button>
       </div>
     </div>

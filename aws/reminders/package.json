@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "name": "daymark-reminders",
+  "version": "1.0.0",
+  "scripts": { "build": "esbuild handler.cjs --bundle --platform=node --target=node22 --external:@aws-sdk/client-dynamodb --outfile=build/index.js" },
+  "dependencies": { "web-push": "^3.6.7" },
+  "devDependencies": { "esbuild": "^0.27.0" }
+}

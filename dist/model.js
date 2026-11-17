@@ -65,6 +65,7 @@
       if (moved && revision.test(line)) {
         const next = dateMatches(moved[2])[0];
         if (next) return { date: readDate(next[0]), quote: line, issue: readDate(next[0]) ? '' : 'Check the new date and year.' };
+        if (relative.test(moved[2])) return { date: '', quote: line, issue: 'This is a relative date. Enter the original message timestamp.' };
       }
     }
     const choices = eligible.map(line => {
@@ -118,7 +119,7 @@
     for (const [category, pattern, verb] of specs) {
       const match = line.match(pattern);
       if (!match || /\b(?:no need to|do not|don't|already|cancelled|canceled)\b/i.test(line)) continue;
-      const object = clean(match[2].split(/\s+(?:by|before|on|using|via|through|at)\s+|[,;]|\s+no later than\b/i)[0])
+      const object = clean(match[2].replace(/\s+(?:of\s+)?(?:₹|Rs\.?\s*|INR\s*)\d[\d,.]*/gi, '').split(/\s+(?:by|before|on|using|via|through|at)\s+|[,;]|\s+no later than\b/i)[0])
         .replace(/^the\s+/i, '').replace(/[.!?]+$/, '');
       const hasName = /[a-z]{3}/i.test(object.replace(/^\s*(?:rs|inr)\b/i, '')) && !/^(?:₹|rs\.?\s*\d|inr\s*\d)/i.test(object);
       const actionVerb = verb || match[1][0].toUpperCase() + match[1].slice(1).toLowerCase();
@@ -142,7 +143,7 @@
     return joined;
   }
 
-  function parse(source, sourceName = 'Pasted notice') {
+  function parse(source, sourceName = 'Pasted notice', metadata = {}) {
     const original = source.trim().slice(0, 30000);
     if (!original) return [];
     const lines = noticeLines(original);
@@ -150,7 +151,7 @@
     const reference = (original.match(refPattern)?.[1] || '').toUpperCase().replaceAll(' ', '-');
     const header = lines.find(line => /^from\s*:/i.test(line)) || lines[0];
     const first = (header || '').replace(/^from\s*:\s*|^(?:correction|update|urgent)\s*[:–—-]\s*/i, '').split(refPattern)[0].trim().replace(/[\s:–—-]+$/, '');
-    const issuer = first && first.length < 64 && !getAction(first) && !dateSignal(first) && !/^\d/.test(first) ? first : '';
+    const issuer = metadata.sender || (first && first.length < 64 && !getAction(first) && !dateSignal(first) && !/^\d/.test(first) ? first : '');
     const cancelled = lines.some(line => cancel.test(line));
     const parts = lines.flatMap((line, index) => {
       const action = getAction(line);
@@ -164,24 +165,88 @@
     return candidates.map((part, index) => {
       const context = rows.length > 1 ? lines.slice(part.index, rows[index + 1]?.index) : lines;
       const timing = cancelled ? { date: '', quote: lines.find(line => cancel.test(line)), issue: 'Confirm that this notice cancels the earlier action.' } : findDeadline(context);
-      const money = part.category === 'payment' && !cancelled ? findAmount(context) : { amount: '', quote: '', issue: '' };
+      const money = !cancelled ? findAmount(context) : { amount: '', quote: '', issue: '' };
       const title = part.title || (part.category === 'payment' && issuer ? 'Pay ' + issuer + ' bill' :
         part.category === 'appointment' ? 'Attend appointment' : 'Review this notice');
       return {
-        title, issuer, reference, category: part.category, due: timing.date, amount: money.amount, cancelled: cancelled && candidates.length === 1,
+        title, issuer, reference, category: part.category, revision: revision.test(original), due: timing.date, amount: money.amount, cancelled: cancelled && candidates.length === 1,
         issues: [timing.issue, money.issue, rows.length > 8 ? 'More actions were found. Review the full notice for anything missing.' : ''].filter(Boolean),
-        source: { name: sourceName, text: original, quotes: [...new Set([part.quote, timing.quote, money.quote].filter(Boolean))] },
+        source: { name: sourceName, text: original, sentAt: metadata.sentAt || '', receivedAt: new Date().toISOString(), quotes: [...new Set([part.quote, timing.quote, money.quote].filter(Boolean))] },
       };
     });
   }
 
+
+  function relativeDate(text, sentAt) {
+    if (!sentAt || !/^\d{4}-\d{2}-\d{2}$/.test(sentAt.slice(0, 10))) return null;
+    const base = sentAt.slice(0, 10);
+    const moved = text.match(/\bfrom\s+.+?\s+to\s+(.+)/i);
+    const found = (moved ? moved[1] : text).match(/\b(tomorrow|today|(?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i);
+    if (!found) return null;
+    const word = found[0].toLowerCase();
+    const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const weekday = weekdays.indexOf(word.split(' ').at(-1));
+    let offset = word === 'tomorrow' ? 1 : 0;
+    if (weekday >= 0) {
+      offset = (weekday - new Date(base + 'T12:00:00Z').getUTCDay() + 7) % 7;
+      if (word.startsWith('next ') && offset === 0) offset = 7;
+    }
+    return { due: dateAt(base, offset), explanation: '“' + found[0] + '” interpreted from the message date ' + fmtDate(base, true) + '. Check this interpretation.' };
+  }
+
+  function dateEvidence(candidate) {
+    if (candidate.due || !candidate.source.sentAt) return candidate;
+    const relative = relativeDate(candidate.source.quotes.join(' ') || candidate.source.text, candidate.source.sentAt);
+    if (relative) return { ...candidate, due: relative.due, interpretation: relative.explanation,
+      issues: candidate.issues.filter(issue => !/relative date|No explicit deadline/.test(issue)) };
+    return candidate;
+  }
+
+  const ignoredWords = new Set(('the a an to for by on at of your please pay submit upload complete return renew bill notice message guys extended deadline date revised correction updated original from due payment amount until this next new still unchanged moved morning afternoon evening it is has been in and all everyone students kindly now').split(' '));
+  function topics(text) {
+    return new Set((text.toLowerCase().match(/[a-z]{3,}/g) || []).filter(word => !ignoredWords.has(word)));
+  }
+
+  function matchCandidates(items, candidate) {
+    const incoming = topics(candidate.title + ' ' + candidate.source.text);
+    return items.filter(item => !item.done).map(item => {
+      const evidence = [];
+      let score = 0;
+      const sameSender = candidate.issuer && normalize(candidate.issuer) === normalize(item.issuer);
+      const conflictingSender = candidate.issuer && item.issuer && !sameSender;
+      const sameReference = candidate.reference && candidate.reference === item.reference;
+      if (sameSender) { score += 4; evidence.push('Same sender or group'); }
+      if (sameReference) { score += 7; evidence.push('Same notice reference ' + candidate.reference); }
+      if (conflictingSender) score -= 8;
+      if (candidate.reference && item.reference && !sameReference) score -= 8;
+      const existing = topics(item.title + ' ' + item.source.text);
+      const overlap = [...incoming].filter(word => existing.has(word));
+      if (overlap.length) {
+        score += Math.min(4, overlap.length * 1.5);
+        evidence.push('Shared topic: ' + overlap.slice(0, 3).join(', '));
+      }
+      if (candidate.amount !== '' && item.amount === candidate.amount) {
+        score += 3;
+        evidence.push('Same amount ' + currency(item.amount));
+      }
+      if (item.due && dateMatches(candidate.source.text).some(match => readDate(match[0]) === item.due)) {
+        score += 2;
+        evidence.push('Mentions the saved deadline');
+      }
+      const sentAt = candidate.source.sentAt;
+      const existingAt = item.source.sentAt;
+      const older = Boolean(sentAt && existingAt && sentAt < existingAt);
+      if (sentAt && existingAt) evidence.push(older ? 'Message predates the saved notice' : 'Message dated after the saved notice');
+      const exact = Boolean(sameReference && sameSender);
+      return { id: item.id, title: item.title, score, evidence, older, exact };
+    }).filter(match => match.score >= 4 && match.evidence.length).sort((a,b) => b.score - a.score);
+  }
+
   function matchAction(items, candidate) {
-    const issuer = normalize(candidate.issuer);
-    if (!issuer || !candidate.reference) return null;
-    const matches = items.filter(item => !item.done && normalize(item.issuer) === issuer &&
-      item.reference.toUpperCase() === candidate.reference.toUpperCase());
-    if (matches.length === 1 && (candidate.cancelled || matches[0].category === candidate.category)) return matches[0];
-    return matches.find(item => item.category === candidate.category && normalize(item.title) === normalize(candidate.title)) || null;
+    if (candidate.targetId) return items.find(item => item.id === candidate.targetId && !item.done) || null;
+    const matches = matchCandidates(items, candidate).filter(match => match.exact);
+    if (matches.length === 1) return items.find(item => item.id === matches[0].id);
+    return null;
   }
 
   function difference(current, candidate) {
@@ -189,19 +254,35 @@
       (candidate.amount !== '' && current.amount !== candidate.amount));
   }
 
+  function sourceKey(source) {
+    return normalize(source.text || '');
+  }
+
   function merge(items, candidate, id) {
-    const target = matchAction(items, candidate);
-    if (!target || (!candidate.cancelled && candidate.keepSeparate)) {
+    candidate = dateEvidence(candidate);
+    const target = candidate.keepSeparate ? null : matchAction(items, candidate);
+    if (!target) {
       return { items: [...items, { ...candidate, id, done: false, pending: null, history: [] }], change: 'added' };
     }
+    const knownSources = [target.source, ...target.history.map(entry => entry.source)];
+    if (knownSources.some(source => sourceKey(source) === sourceKey(candidate.source))) return { items, change: 'unchanged' };
+    const obsolete = Boolean(candidate.source.sentAt && target.source.sentAt && candidate.source.sentAt < target.source.sentAt);
+    if (obsolete) {
+      const entry = { due: candidate.due, amount: candidate.amount, source: candidate.source, archived: true };
+      return { items: items.map(item => item.id === target.id ? { ...item, history: [entry, ...item.history].slice(0, 25) } : item), change: 'archived' };
+    }
     if (!difference(target, candidate)) return { items, change: 'unchanged' };
-    return { items: items.map(item => item.id === target.id ? { ...item, pending: candidate } : item), change: 'updated' };
+    if (target.pending && target.pending.source.sentAt && candidate.source.sentAt && candidate.source.sentAt < target.pending.source.sentAt) {
+      return { items: items.map(item => item.id === target.id ? { ...item, history: [{ due: candidate.due, amount: candidate.amount, source: candidate.source, archived: true }, ...item.history].slice(0, 25) } : item), change: 'archived' };
+    }
+    const evidence = matchCandidates(items, candidate).find(match => match.id === target.id)?.evidence || ['Linked by you'];
+    return { items: items.map(item => item.id === target.id ? { ...item, pending: { ...candidate, evidence } } : item), change: 'updated' };
   }
 
   function resolve(items, id, accept) {
     return items.map(item => {
       if (item.id !== id || !item.pending) return item;
-      if (!accept) return { ...item, pending: null };
+      if (!accept) return { ...item, history: [{ due: item.pending.due, amount: item.pending.amount, source: item.pending.source, rejected: true }, ...item.history].slice(0,25), pending: null };
       const { due, amount, source, cancelled } = item.pending;
       return {
         ...item,
@@ -210,7 +291,8 @@
         source,
         done: Boolean(cancelled),
         cancelled: Boolean(cancelled),
-        history: [{ due: item.due, amount: item.amount, source: item.source }, ...item.history].slice(0, 4),
+        reminder: item.reminder ? { ...item.reminder, date: due || item.due } : undefined,
+        history: [{ due: item.due, amount: item.amount, source: item.source }, ...item.history].slice(0, 25),
         pending: null,
       };
     });
@@ -261,7 +343,7 @@
     }
     const events = items.filter(item => item.due && !item.done && !item.pending).map(item => [
       'BEGIN:VEVENT',
-      'UID:' + safe(item.id) + '-' + item.due + '@daymark.local',
+      'UID:' + safe(item.id) + '@daymark.local',
       'DTSTAMP:' + now.toISOString().replace(/[-:]|\.\d{3}/g, ''),
       'DTSTART;VALUE=DATE:' + item.due.replaceAll('-', ''),
       'SUMMARY:' + safe(item.title),
@@ -271,7 +353,7 @@
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Daymark//Action calendar//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR', ''].map(fold).join('\r\n');
   }
 
-  const model = { categories, dayKey, dateAt, daysUntil, fmtDate, currency, readDate, parse, seed, sample, matchAction, difference, merge, resolve, makeCalendar };
+  const model = { categories, dayKey, dateAt, daysUntil, fmtDate, currency, readDate, parse, seed, sample, matchCandidates, relativeDate, dateEvidence, matchAction, difference, merge, resolve, makeCalendar };
   if (typeof module !== 'undefined' && module.exports) module.exports = model;
   else root.Daymark = model;
 })(globalThis);
