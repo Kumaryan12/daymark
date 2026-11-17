@@ -7,6 +7,9 @@ const stateKey = 'daymark-plan-v1';
 const standalone = Boolean(window.DAYMARK_STANDALONE);
 let state = load();
 let boardTab = 'open';
+let selectedDate = '';
+let weekOffset = 0;
+let replayState = null;
 let mode = 'file';
 let processing = false;
 let importDraft = [];
@@ -39,6 +42,10 @@ const icons = {
   list: '<path d="M8 6h11M8 12h11M8 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
   x: '<path d="m6 6 12 12M18 6 6 18"/>',
   edit: '<path d="m13 6 5 5M5 19l4-1 10-10a2.8 2.8 0 0 0-4-4L5 14l-1 5Z"/>',
+  play: '<path d="m9 5 11 7-11 7V5Z"/>',
+  left: '<path d="m15 6-6 6 6 6"/>',
+  message: '<path d="M20 11a7 7 0 0 1-7 7H7l-4 3v-9a8 8 0 0 1 8-8h2a7 7 0 0 1 7 7Z"/><path d="M8 9h7m-7 4h5"/>',
+  history: '<path d="M3 12a9 9 0 1 1 3 7m-3-7V7m0 5h5m4-5v5l3 2"/>',
   trash: '<path d="M4 6h16M9 6V3h6v3m3 0-1 15H7L6 6m4 4v7m4-7v7"/>',
 };
 const svg = name => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${icons[name] || icons.file}</svg>`;
@@ -90,11 +97,84 @@ function changeLabel(item) {
   return 'Amount changed';
 }
 
+function renderSpotlight(open) {
+  const spotlight = $('#spotlight');
+  if (!spotlight) return;
+  const item = [...open].filter(row => row.due).sort(byDue)[0];
+  if (!item) {
+    spotlight.innerHTML = `<div class="next-card next-empty">
+      <span class="next-icon">${icon('circle')}</span><div><small>YOUR PLAN</small>
+      <strong>No scheduled deadlines</strong><span>Add a notice to schedule an action.</span></div>
+    </div>`;
+    return;
+  }
+  spotlight.innerHTML = `<button class="next-card" data-action="${item.pending ? 'review' : 'details'}" data-id="${esc(item.id)}">
+    <span class="next-icon">${icon(model.categories[item.category]?.icon || 'calendar')}</span>
+    <span class="next-info"><small>NEXT DEADLINE</small><strong>${esc(item.title)}</strong>
+    <span>${model.fmtDate(item.due)} · ${item.pending ? 'Change to review' : dueDescription(item)}</span></span>
+    <span class="next-arrow">${icon('arrow')}</span>
+  </button>`;
+}
+
+function renderTimeline(open) {
+  const timeline = $('#timeline');
+  if (!timeline) return;
+  const focused = timeline.contains(document.activeElement) ? document.activeElement.dataset : null;
+  const today = model.dayKey();
+  const start = model.dateAt(today, weekOffset * 7);
+  const end = model.dateAt(start, 6);
+  const dayNames = new Intl.DateTimeFormat('en-IN', { weekday: 'short', timeZone: 'UTC' });
+  const days = Array.from({ length: 7 }, (_, index) => model.dateAt(start, index));
+  const counts = new Map();
+  for (const item of open) {
+    const current = counts.get(item.due) || { due: 0, changes: 0 };
+    if (item.due) {
+      current.due++;
+      counts.set(item.due, current);
+    }
+    const proposed = item.pending?.due;
+    if (proposed && proposed !== item.due) {
+      const date = counts.get(proposed) || { due: 0, changes: 0 };
+      date.changes++;
+      counts.set(proposed, date);
+    }
+  }
+  timeline.innerHTML = `
+    <header class="schedule-head">
+      <div><h2 id="timeline-title">${weekOffset === 0 ? 'Week ahead' : 'Deadline calendar'}</h2><p>${model.fmtDate(start)} – ${model.fmtDate(end, true)}</p></div>
+      <div class="week-controls">
+        ${weekOffset ? '<button class="today-button" data-action="week" data-shift="0">Today</button>' : ''}
+        <button class="week-arrow" data-action="week" data-shift="-1" aria-label="Previous week">${icon('left')}</button>
+        <button class="week-arrow" data-action="week" data-shift="1" aria-label="Next week">${icon('chevron')}</button>
+      </div>
+    </header>
+    <div class="calendar-days" role="group" aria-label="Filter by deadline">
+      ${days.map(date => {
+        const { due, changes } = counts.get(date) || { due: 0, changes: 0 };
+        const label = `${model.fmtDate(date, true)}${date === today ? ', today' : ''}, ${due} due, ${changes} proposed`;
+        return `<button class="calendar-day ${date === today ? 'calendar-today' : ''}" data-action="date" data-date="${date}" aria-label="${label}" aria-pressed="${selectedDate === date}">
+          <span>${date === today ? 'Today' : dayNames.format(new Date(date + 'T00:00:00Z'))}</span><strong>${Number(date.slice(-2))}</strong>
+          <span class="day-marks" aria-hidden="true">${due ? `<b class="day-due">${due}</b>` : ''}${changes ? `<b class="day-proposal">${changes}</b>` : ''}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="calendar-legend"><span><b class="day-due"></b> Saved deadline</span><span><b class="day-proposal"></b> Proposed date</span>
+    ${selectedDate ? '<button class="text-button" data-action="clear-date">Clear date filter</button>' : ''}</div>`;
+  if (focused) {
+    const buttons = [...timeline.querySelectorAll('button')];
+    const same = buttons.find(button => button.dataset.action === focused.action &&
+      button.dataset.date === focused.date && button.dataset.shift === focused.shift);
+    (same || timeline.querySelector('[data-action="date"]'))?.focus({ preventScroll: true });
+  }
+}
+
 function render() {
   $('#today').textContent = new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }).format(new Date());
   const open = state.filter(item => !item.done);
   const done = state.filter(item => item.done);
   const reviews = open.filter(isReview);
+  renderSpotlight(open);
+  renderTimeline(open);
   const stats = [
     ['soon', open.filter(isSoon).length, 'Due within 7 days', 'clock', ''],
     ['updates', reviews.length, 'Needs review', 'alert', 'warn'],
@@ -109,21 +189,23 @@ function render() {
   for (const [key, value] of stats) {
     const stat = document.querySelector(`[data-stat="${key}"]`);
     stat.querySelector('strong').textContent = value;
-    stat.setAttribute('aria-pressed', String(boardTab === key));
+    stat.setAttribute('aria-pressed', String(!selectedDate && boardTab === key));
   }
-  const filtered = boardTab === 'done' ? done : boardTab === 'updates' ? reviews : boardTab === 'soon' ? open.filter(isSoon) : open;
-  const label = { open: 'open', done: 'completed', updates: 'to review', soon: 'due soon' }[boardTab];
+  const dateMatches = item => item.due === selectedDate || item.pending?.due === selectedDate;
+  const filtered = selectedDate ? open.filter(dateMatches) :
+    boardTab === 'done' ? done : boardTab === 'updates' ? reviews : boardTab === 'soon' ? open.filter(isSoon) : open;
+  const label = selectedDate ? 'on ' + model.fmtDate(selectedDate) : { open: 'open', done: 'completed', updates: 'to review', soon: 'due soon' }[boardTab];
   $('#board-summary').textContent = `${filtered.length} ${filtered.length === 1 ? 'action' : 'actions'} ${label}${state.some(item => item.demo) ? ' · Sample notices included' : ''}`;
-  $('#tabs').querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tab === boardTab)));
+  $('#tabs').querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(!selectedDate && button.dataset.tab === boardTab)));
   const rows = [...filtered].sort(byDue);
   if (!rows.length) {
-    const emptyText = {
+    const emptyText = selectedDate ? ['No deadlines on ' + model.fmtDate(selectedDate), 'Choose another date or clear the date filter.'] : {
       open: ['Your action plan is clear', 'Add a notice to start tracking what’s due.'],
       soon: ['Nothing due soon', 'Upcoming deadlines within seven days will appear here.'],
       updates: ['Nothing to review', 'Missing dates and changes to saved notices will appear here.'],
       done: ['No completed actions yet', 'Mark an action done to find it here.'],
     }[boardTab];
-    $('#actions').innerHTML = `<div class="empty"><h3>${emptyText[0]}</h3><p>${emptyText[1]}</p>${boardTab === 'open' ? '<button class="button outline" data-action="add">Add a notice</button>' : ''}</div>`;
+    $('#actions').innerHTML = `<div class="empty"><h3>${emptyText[0]}</h3><p>${emptyText[1]}</p>${selectedDate ? '<button class="button outline" data-action="clear-date">See all open actions</button>' : boardTab === 'open' ? '<button class="button outline" data-action="add">Add a notice</button>' : ''}</div>`;
     return;
   }
   $('#actions').innerHTML = `<div class="action-list">${rows.map(item => `
@@ -133,6 +215,7 @@ function render() {
         <div class="row-main"><button class="row-title" data-action="details" data-id="${esc(item.id)}">${esc(item.title)}</button>
         ${item.pending ? `<span class="badge warn">${icon('alert')}${changeLabel(item)}</span>` : item.cancelled ? '<span class="badge">Cancelled</span>' : ''}</div>
         <p class="row-sub">${esc([item.source.name, model.currency(item.amount)].filter(Boolean).join(' · '))}</p>
+        ${selectedDate && item.pending?.due === selectedDate && item.due !== selectedDate ? '<p class="row-sub proposed-line">Proposed for this date</p>' : ''}
       </div>
       <div class="row-end">
         ${item.cancelled ? '' : `<span class="due-cluster ${!item.done && model.daysUntil(item.due) < 0 ? 'overdue' : ''}"><strong>${model.fmtDate(item.due)}</strong><small>${item.done ? 'Done' : dueDescription(item)}</small></span>`}
@@ -178,6 +261,77 @@ function details(item) {
     </div>`, typeIcon(item.category));
 }
 
+function dateShift(current, proposed) {
+  if (!current || !proposed || current === proposed) return '';
+  const offset = model.daysUntil(proposed, current);
+  const days = Math.abs(offset);
+  return days + (days === 1 ? ' day ' : ' days ') + (offset > 0 ? 'later' : 'earlier');
+}
+
+function dateComparison(current, proposed) {
+  const shift = dateShift(current, proposed);
+  if (!shift) return '';
+  return `<div class="date-comparison">
+    <span><small>Saved</small><strong>${model.fmtDate(current)}</strong></span>
+    ${icon('arrow')}
+    <span><small>Proposed</small><strong>${model.fmtDate(proposed)}</strong></span>
+    <b>${shift}</b>
+  </div>`;
+}
+
+function startReplay() {
+  const today = model.dayKey();
+  const [first] = model.parse(model.sample('maintenance', today), 'Sample · Housing group');
+  const [second] = model.parse(model.sample('revision', today), 'Sample · Housing group correction');
+  const initial = model.merge([], first, 'replay-notice').items;
+  const [item] = model.merge(initial, second, 'replay-revision').items;
+  replayState = { step: 0, item, result: null, accepted: false };
+  renderReplay();
+}
+
+function replayNotice(source, heading, variant = '') {
+  return `<article class="replay-message ${variant}">
+    <span class="replay-avatar" aria-hidden="true">MR</span>
+    <div><header><strong>Maple Residency</strong><span>${heading}</span></header>
+    ${quotes(source)}<small>Ref MR-1126</small></div>
+  </article>`;
+}
+
+function renderReplay() {
+  const { step, item, result, accepted } = replayState;
+  const proposed = item.pending.due;
+  const steps = ['Original notice', 'Correction arrives', 'Your decision'];
+  const stepper = `<ol class="replay-steps" aria-label="Replay progress">${steps.map((label, index) =>
+    `<li class="${index <= step ? 'reached' : ''}" ${index === step ? 'aria-current="step"' : ''}><span>${index < step ? icon('check') : index + 1}</span>${label}</li>`
+  ).join('')}</ol>`;
+  let content;
+  if (step === 0) {
+    content = `<p class="replay-intro">A maintenance bill lands in your housing group. Daymark finds the due date and keeps the original wording beside it.</p>
+      ${replayNotice(item.source, 'Original notice')}
+      <div class="replay-facts">${detail('Action', 'Pay society maintenance')}${detail('Due date', model.fmtDate(item.due, true))}${detail('Amount', model.currency(item.amount))}</div>
+      <div class="dialog-actions"><button class="button dark" data-action="replay-arrive">Reveal the follow-up ${icon('arrow')}</button></div>`;
+  } else if (step === 1) {
+    content = `<p class="replay-intro">A second message has the same sender and reference. Its deadline disagrees with the one saved in the plan.</p>
+      <div class="replay-pair">${replayNotice(item.source, 'Saved notice')}${replayNotice(item.pending.source, 'New message', 'replay-arrived')}</div>
+      ${dateComparison(item.due, proposed)}
+      <div class="dialog-actions">
+        <button class="button outline" data-choice="original" data-action="replay-decision">Keep original date</button>
+        <button class="button dark" data-choice="updated" data-action="replay-decision">${icon('check')} Use ${model.fmtDate(proposed)}</button>
+      </div>`;
+  } else {
+    content = `<div class="replay-result">
+      <span class="replay-result-icon">${icon(accepted ? 'circle' : 'history')}</span>
+      <h3>${accepted ? 'Deadline updated' : 'Saved deadline kept'}</h3>
+      <p>The sample action is due <strong>${model.fmtDate(result.due, true)}</strong>.</p>
+      <p>${accepted ? 'The earlier notice is available in its source history.' : 'The original notice stays attached to the action.'}</p>
+    </div>
+    <div class="dialog-actions"><button class="button outline" data-action="replay">Replay again</button>
+    <button class="button dark" data-action="close">Back to my plan</button></div>`;
+  }
+  openDialog('Deadline replay', 'Try it with a sample notice. Your own plan stays separate.', `<div class="replay-board">${stepper}${content}</div>`,
+    `<span class="tool-icon">${icon('play')}</span>`);
+}
+
 function review(item) {
   if (!item?.pending) return;
   const next = item.pending;
@@ -186,6 +340,7 @@ function review(item) {
     ${amount !== '' ? `<p>${esc(model.currency(amount))}</p>` : ''}${quotes(source)}${fullSource(source, 'Full notice')}</div>`;
   openDialog(changeLabel(item), [item.title, item.reference].filter(Boolean).join(' · '), `
     <p class="dialog-copy">Compare the saved notice with the proposed change. Your plan updates when you approve it.</p>
+    ${dateComparison(item.due, next.due)}
     <div class="compare">${pane('', 'Saved in your plan', model.fmtDate(item.due, true), item.amount, item.source)}
       ${pane('proposed', 'Proposed change', proposed, next.cancelled ? '' : next.amount === '' ? item.amount : next.amount, next.source)}</div>
     <div class="dialog-actions">
@@ -423,7 +578,33 @@ document.addEventListener('click', event => {
   const item = id ? find(id) : null;
   switch (action) {
     case 'add': openImporter(); break;
-    case 'tab': boardTab = tab || stat; render(); break;
+    case 'tab': boardTab = tab || stat; selectedDate = ''; render(); break;
+    case 'week': {
+      const shift = Number(button.dataset.shift);
+      weekOffset = shift === 0 ? 0 : weekOffset + shift;
+      selectedDate = '';
+      render();
+      break;
+    }
+    case 'date': selectedDate = selectedDate === button.dataset.date ? '' : button.dataset.date; boardTab = 'open'; render(); break;
+    case 'clear-date': {
+      const callButton = button.closest('#actions');
+      selectedDate = '';
+      boardTab = 'open';
+      render();
+      if (callButton) $('#tabs button').focus({ preventScroll: true });
+      break;
+    }
+    case 'replay': startReplay(); break;
+    case 'replay-arrive': replayState.step = 1; renderReplay(); break;
+    case 'replay-decision': {
+      const accepted = button.dataset.choice === 'updated';
+      replayState.result = model.resolve([replayState.item], replayState.item.id, accepted)[0];
+      replayState.accepted = accepted;
+      replayState.step = 2;
+      renderReplay();
+      break;
+    }
     case 'input': setMode(next); break;
     case 'select-file': $('#file-picker').click(); break;
     case 'sample': beginDraft(model.sample('school'), 'School message · Sample', true); break;
@@ -492,6 +673,7 @@ dialog.addEventListener('submit', event => {
   }
   if (next.length > 55) { showFormError('This plan has 55 actions. Remove some old actions and try again.'); return; }
   boardTab = updates ? 'updates' : 'open';
+  selectedDate = '';
   if (save(next)) {
     dialog.close();
     $('#notice-text').value = '';

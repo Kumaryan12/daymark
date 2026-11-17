@@ -9,9 +9,9 @@
   <meta name="theme-color" content="#f7f7f1">
   <title>Daymark — Your personal action inbox</title>
   <link rel="icon" href="assets/daymark.svg">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2">
   <script defer src="model.js"></script>
-  <script defer src="app.js"></script>
+  <script defer src="app.js?v=2"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -30,10 +30,17 @@
       <div class="hero-copy">
         <h1 id="title">Know what’s <em>due.</em></h1>
         <p>Turn bills, screenshots, and forwarded messages into a plan you can act on.</p>
-        <button class="button lime" data-action="add"><i data-icon="plus"></i> Add a notice</button>
+        <div class="hero-actions">
+          <button class="button lime" data-action="add"><i data-icon="plus"></i> Add a notice</button>
+          <button class="button hero-outline" data-action="replay"><i data-icon="play"></i> Try deadline replay</button>
+        </div>
       </div>
+      <div id="spotlight" class="hero-spotlight"></div>
     </section>
-    <section class="stats" id="stats" aria-label="Action plan summary"></section>
+    <div class="overview">
+      <section class="calendar-strip" id="timeline" aria-labelledby="timeline-title"></section>
+      <section class="stats" id="stats" aria-label="Action plan summary"></section>
+    </div>
     <div class="workspace">
       <section class="plan" aria-labelledby="plan-title">
         <div class="section-top">

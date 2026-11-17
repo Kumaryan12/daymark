@@ -22,7 +22,9 @@ python3 -m http.server 8766 --directory dist
 
 Open http://localhost:8766. All OCR and PDF engines are bundled and loaded on demand. The downloadable standalone HTML supports pasted text and TXT files. Use the served app for screenshots and PDFs.
 
-For a quick demo, choose **Review change** on the sample housing maintenance bill. Compare the two dates and the original wording. Apply the proposed date, open the action to see its source history, and export the calendar. **Try a sample notice** walks through extraction and review. Use **Data & privacy** to remove the sample actions.
+For a quick demo, start with **Try deadline replay**. Reveal the follow-up notice and choose the date you would use. The walkthrough runs separately from your plan. The **Week ahead** calendar shows saved deadlines in green and proposed dates in amber. Select a day to view the matching actions.
+
+To try the same decision in your plan, choose **Review change** on the sample housing maintenance bill. Compare the two dates and the original wording. Apply the proposed date, open the action to see its source history, and export the calendar. **Try a sample notice** walks through extraction and review. Use **Data & privacy** to remove the sample actions.
 
 ## Build summary
 
