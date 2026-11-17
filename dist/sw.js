@@ -1,7 +1,7 @@
 'use strict';
-const SHELL = 'daymark-v3';
+const SHELL = 'daymark-v3-1';
 const SHARES = 'daymark-share-inbox';
-const shellFiles = ['/', '/index.html', '/style.css?v=3', '/model.js?v=3', '/app.js?v=3', '/device.js?v=3', '/reminder-config.js', '/manifest.webmanifest', '/assets/daymark.svg', '/assets/icon-192.png', '/assets/icon-512.png', '/assets/geist.woff2', '/assets/instrument-serif-italic.woff2', '/assets/notices.jpg'];
+const shellFiles = ['/', '/index.html', '/style.css?v=3', '/model.js?v=3', '/app.js?v=3', '/device.js?v=3.1', '/reminder-config.js', '/manifest.webmanifest', '/assets/daymark.svg', '/assets/icon-192.png', '/assets/icon-512.png', '/assets/geist.woff2', '/assets/instrument-serif-italic.woff2', '/assets/notices.jpg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(SHELL).then(cache => cache.addAll(shellFiles)).then(() => self.skipWaiting()));

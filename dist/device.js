@@ -52,7 +52,10 @@
     return synced ? 'This device’s reminders are up to date.' : 'Checking this device’s reminders…';
   }
 
-  function showReminders() {
+  function showReminders(preserveDraft = true) {
+    const previousForm = document.querySelector('#reminder-form');
+    const draft = preserveDraft && previousForm ? new FormData(previousForm) : null;
+    const selected = new Set(draft?.getAll('task') || []);
     const items = app.getState().filter(item => !item.done && item.due);
     const canEnable = config && supportsPush() && !iPhone() && Notification.permission !== 'denied';
     openDialog('Reminders on this device', 'Approved date changes reschedule reminders. Completing an action removes its reminder.', `
@@ -61,8 +64,8 @@
       ${!enabled() && canEnable ? '<button class="button dark" data-device="enable">Enable notifications</button>' : ''}
       <form id="reminder-form">
         ${items.length ? items.map(item => `<div class="reminder-item">
-          <label><input type="checkbox" name="task" value="${esc(item.id)}" ${item.reminder ? 'checked' : ''}><span><strong>${esc(item.title)}</strong><small>${Daymark.fmtDate(item.due, true)}${item.pending ? ' · Current date until you approve the change' : ''}</small></span></label>
-          <label class="field">Time on the due date<input type="time" name="time-${esc(item.id)}" value="${esc(item.reminder?.time || '09:00')}" required></label>
+          <label><input type="checkbox" name="task" value="${esc(item.id)}" ${(draft ? selected.has(item.id) : item.reminder) ? 'checked' : ''}><span><strong>${esc(item.title)}</strong><small>${Daymark.fmtDate(item.due, true)}${item.pending ? ' · Current date until you approve the change' : ''}</small></span></label>
+          <label class="field">Time on the due date<input type="time" name="time-${esc(item.id)}" value="${esc(draft?.get('time-' + item.id) || item.reminder?.time || '09:00')}" required></label>
         </div>`).join('') : '<p class="dialog-copy">Add an action with a due date to set a reminder.</p>'}
         <p class="dialog-copy">Times use this device’s timezone, ${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}. The service checks schedules every minute.</p>
         <div class="dialog-actions">
@@ -164,7 +167,7 @@
     synced = false;
     disabling = false;
     lastError = '';
-    showReminders();
+    showReminders(false);
     notify('Reminders disabled on this device.');
   }
 
