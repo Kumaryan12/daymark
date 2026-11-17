@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="description" content="Turn everyday notices into a private action plan with deadlines, amounts, and original sources.">
+  <meta name="theme-color" content="#f7f7f1">
+  <title>Daymark — Your personal action inbox</title>
+  <link rel="icon" href="assets/daymark.svg">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="model.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <div class="frame toolbar">
+      <a class="brand" href="#" aria-label="Daymark home"><img src="assets/daymark.svg" alt="" width="37" height="37"><span>daymark<span class="brand-dot">.</span></span></a>
+      <div class="toolbar-right">
+        <span class="today" id="today"></span>
+        <button class="privacy" data-action="privacy"><i data-icon="lock"></i><span>Private workspace</span></button>
+      </div>
+    </div>
+  </header>
+  <main id="main" class="frame">
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-art"></div>
+      <div class="hero-copy">
+        <h1 id="title">Know what’s <em>due.</em></h1>
+        <p>Turn bills, screenshots, and forwarded messages into a plan you can act on.</p>
+        <button class="button lime" data-action="add"><i data-icon="plus"></i> Add a notice</button>
+      </div>
+    </section>
+    <section class="stats" id="stats" aria-label="Action plan summary"></section>
+    <div class="workspace">
+      <section class="plan" aria-labelledby="plan-title">
+        <div class="section-top">
+          <div><h2 id="plan-title">Action plan</h2><p id="board-summary"></p></div>
+          <button class="button outline export" data-action="export"><i data-icon="calendar"></i><span>Export calendar</span></button>
+        </div>
+        <div class="tabs" role="group" aria-label="Filter actions" id="tabs">
+          <button data-action="tab" data-tab="open" aria-pressed="true">Open</button>
+          <button data-action="tab" data-tab="updates" aria-pressed="false">Needs review</button>
+          <button data-action="tab" data-tab="done" aria-pressed="false">Done</button>
+        </div>
+        <div id="actions"></div>
+      </section>
+      <aside class="import-card" id="add-notice" aria-labelledby="add-title">
+        <header class="import-head"><span class="tool-icon"><i data-icon="inbox"></i></span><div><h2 id="add-title" tabindex="-1">Add a notice</h2><p>Check the extracted details before saving.</p></div></header>
+        <div class="mode" role="group" aria-label="Notice input mode">
+          <button data-action="input" data-mode="file" aria-pressed="true"><i data-icon="upload"></i>Upload</button>
+          <button data-action="input" data-mode="text" aria-pressed="false"><i data-icon="text"></i>Paste text</button>
+        </div>
+        <div id="file-pane">
+          <button class="drop-zone" id="drop-zone" data-action="select-file"><span class="drop-icon"><i data-icon="upload"></i></span><strong>Drop a file or <span>browse</span></strong><small>PNG, JPG, WEBP, PDF or TXT</small></button>
+          <input id="file-picker" aria-label="Choose a notice file" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,.pdf,.txt" hidden>
+        </div>
+        <form id="text-pane" hidden>
+          <label class="visually-hidden" for="notice-text">Paste the message or bill text</label>
+          <textarea id="notice-text" maxlength="30000" placeholder="Paste the message or bill text…" rows="5" required></textarea>
+          <button class="button dark extract" type="submit"><i data-icon="spark"></i> Extract actions</button>
+        </form>
+        <div id="import-status" role="status" hidden></div>
+        <div class="sample-action"><button class="sample" data-action="sample"><i data-icon="spark"></i> Try a sample notice <i data-icon="arrow"></i></button></div>
+        <p class="private-note"><i data-icon="shield"></i> Files are read in this browser.</p>
+      </aside>
+    </div>
+    <footer><span>Daymark · Personal action inbox</span><button class="text-button" data-action="privacy">Data &amp; privacy</button></footer>
+  </main>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
